@@ -1,178 +1,95 @@
-#include <stdio.h>
-#include <stdlib.h>
+/*
+
+Gömülü sistemler için C dili pratikleri. Stm32 mikrodenetleyicileri odaklý.
+
+*/
+
+
+// STM32’ye Özgü Ama Standart Gibi Kullanýlan Baþlýklar. Bunlar C standardý deðil, STM32 ekosisteminin temelidir.
+#include "stm32f4xx.h"        // CMSIS, register tanýmlarý
+#include "stm32f4xx_hal.h"    // HAL üst seviye sürücüler
+
+
 #include <stdint.h>           // Sabit bit geniþliðinde veri tipleri
+uint8_t  rxData;             // 8-bit veri, UART/SPI için
+uint16_t adcValue;           // 12-bit ADC için güvenli taþýyýcý
+uint32_t tick;               // SysTick / timer sayaçlarý
 
-//-----------------------------------------------------------------------------------------------------------------------------
-// Deðiþken tanýmlamalarý 
 
-// Temel Deðiþken Tanýmlamalarý
-int counter;                 // Varsayýlan olarak RAM’de yer alan, iþareti olan tam sayý deðiþken
-unsigned int tick;           // Negatif deðer almayan sayaçlar için tercih edilir
-char rxByte;                 // UART vb. haberleþmelerde tek bayt veri için kullanýlýr
-float temperature;           // Sensörlerden gelen ondalýklý veriler için
+#include <stdbool.h>         // bool, true, false tanýmlar. C dilinde bool tipi yoktur, bu kütüphane saðlar. Bayrak mantýðýnda okunabilirliði ciddi artýrýr.
+bool systemReady;            // Sistem hazýr mý bayraðý
 
-// STM32’de Sýk Kullanýlan Sabit Geniþlikli Tipler (stdint.h). Gömülü sistemlerde taþýnabilirlik ve bellek kontrolü için bu tipler kritik önemdedir.
-uint8_t  uartData;            // 8-bit, UART RX/TX için ideal
-uint16_t adcValue;            // 12-bit ADC verileri genelde 16-bit deðiþkende tutulur
-uint32_t systemTick;          // SysTick veya zamanlayýcý sayaçlarý için
-int16_t  motorSpeed;          // Pozitif/negatif yönlü motor hýz bilgisi
 
-// Baþlangýç Deðeri Verilerek Tanýmlama. STM32 tarafýnda ilk deðer verilmemiþ deðiþkenler RAM’de rastgele deðer içerebilir.
-uint8_t ledState = 0;         // LED baþlangýçta kapalý
-uint16_t adcRaw = 0;          // ADC ölçümü baþlamadan önce sýfýrlanýr
-float voltage = 0.0f;         // Hesaplamalarda belirsizlik olmamasý için
+#include <stddef.h>          // NULL, size_t gibi temel tanýmlar. Pointer tabanlý kodlarda gereklidir. Driver yazarken null kontrolü için sýk kullanýlýr.
+uint8_t *pBuffer = NULL;     // Pointer baþlangýçta boþ
 
-//const Kullanýmý (Flash Bellek Odaklý). Sabitler Flash bellekte tutulur, RAM tüketmez.
-const uint16_t ADC_MAX = 4095;    // 12-bit ADC maksimum deðeri
-const float VREF = 3.3f;          // Referans voltaj sabiti
+#include <string.h>          // memcpy, memset, strlen vb. DMA, buffer, frame yönetiminde sýk kullanýlýr. STM32’de stack ve performans etkisi olabilir. strcpy gibi fonksiyonlar genelde önerilmez.
+uint8_t txBuffer[10];
+memset(txBuffer, 0, sizeof(txBuffer));   // Buffer sýfýrlama
 
-// volatile Kullanýmý (Donaným Register / ISR). Donaným tarafýndan deðiþebilen deðiþkenler için zorunludur.
-volatile uint8_t uartRxFlag;       // UART interrupt içinde deðiþtirilen bayrak
-volatile uint32_t msCounter;       // Timer interrupt ile artan sayaç
 
-// Global ve Local Deðiþken Örneði
-uint8_t errorCode;                 // Global deðiþken, tüm dosyada eriþilebilir
-void ReadSensor(void)
+#include <stdio.h>           // printf, sprintf vb. <stdio.h> — Standart G/Ç (Sýnýrlý Kullaným). Genellikle debug amaçlý kullanýlýr. RAM ve Flash tüketimi yüksektir. Üretim kodunda çoðu zaman kapatýlýr.
+printf("ADC: %d\n", adcValue);   // SWO veya UART debug çýktýsý
+
+
+#include <stdlib.h>          // atoi, malloc, free vb. Genel Amaçlý Yardýmcý Fonksiyonlar. Embedded projelerde çok sýnýrlý kullanýlýr. malloc / free çoðu STM32 projesinde önerilmez Fragmentation riski vardýr.
+int value = atoi("123");     // String › int dönüþümü
+
+#include <math.h>            // sqrt, sin, cos vb. Matematik Fonksiyonlarý. Sensör ve kontrol algoritmalarýnda kullanýlýr. FPU yoksa ciddi performans maliyeti vardýr. Çoðu projede sabit nokta tercih edilir.
+float rms = sqrt(25.0f);     // Karekök hesaplama
+
+
+#include <assert.h>          // assert makrosu. Geliþtirme Aþamasý Kontroller. Hata ayýklamada faydalýdýr. Debug build’te açýk Release build’te kapatýlýr
+assert(adcValue <= 4095);    // ADC sýnýr kontrolü
+
+
+#include <limits.h>          // Veri tipi min/max deðerleri. Taþma (overflow) kontrolü için kullanýlýr.
+uint8_t value;
+if (value == UCHAR_MAX)      // 8-bit maksimum deðere ulaþýldý mý
 {
-    uint16_t sensorValue;          // Local deðiþken, sadece fonksiyon içinde geçerli
-    sensorValue = 1234;            // Sensör okuma simülasyonu
+    value = 0;               // Sayaç sýfýrlanýr
 }
 
-// STM32 HAL Tarzý Tip Tanýmlama (typedef). Kod okunabilirliðini ciddi þekilde artýrýr.
-typedef uint8_t bool_t;            // Gömülü projelerde sýk kullanýlan boolean tanýmý
-bool_t isSystemReady;              // Sistem hazýr mý bayraðý
 
-//-----------------------------------------------------------------------------------------------------------------------------
-// Pointer 
-
-// Pointer, bir deðiþkenin RAM’deki adresini tutan deðiþkendir.
-int value = 10;              // RAM’de bir tamsayý deðiþken
-int *pValue;                 // int tipinde bir deðiþkenin adresini tutacak pointer
-pValue = &value;             // value deðiþkeninin adresi pValue içine atanýr
-
-// Pointer ile Deðere Eriþim (Dereference). * operatörü ile pointer’ýn gösterdiði adresteki deðere ulaþýlýr. STM32 tarafýnda bu mekanizma register eriþiminin temelidir.
-int value = 10;              // Normal deðiþken
-int *pValue = &value;        // value’nun adresi pointer’a atanýr
-value = 20;                  // Deðiþken doðrudan deðiþtirilir
-*pValue = 30;                // Pointer üzerinden ayný deðiþken deðiþtirilir
-
-// Pointer ve Sabit Geniþlikli Tipler (stdint.h). Gömülü sistemlerde pointer tipi, iþaret edilen veriyle birebir uyumlu olmalýdýr.
-uint16_t adcValue = 0;       // ADC ölçüm deðeri
-uint16_t *pAdcValue;         // 16-bit veri gösteren pointer
-pAdcValue = &adcValue;       // Adres atamasý
-
-// Fonksiyonlara Pointer ile Parametre Gönderme. STM32 HAL ve driver yapýlarýnda çok sýk kullanýlýr.
-void ReadADC(uint16_t *value)    // ADC sonucunu yazmak için pointer alýnýr
+#include <ctype.h>           // isdigit, isalpha vb. Karakter Kontrolleri. UART üzerinden gelen ASCII veriler için faydalýdýr.
+char rx;
+if (isdigit(rx))             // Gelen karakter rakam mý
 {
-    *value = 2048;               // Ölçüm sonucu pointer üzerinden yazýlýr
+    /* iþlem */
 }
 
-int main(void)
+
+#include <time.h>            // time_t tanýmý. Zaman Fonksiyonlarý (Sýnýrlý). Bare-metal STM32’de genelde kullanýlmaz. RTC + RTOS olmayan sistemlerde pratik karþýlýðý yoktur
+time_t t;                    // RTOS varsa anlamlý olabilir
+
+
+#include <errno.h>           // Hata kodlarý. POSIX benzeri katmanlarda veya middleware’de görülür.
+int err = errno;             // Son hata kodu
+
+
+#include <stdarg.h>          // va_list tanýmý. Deðiþken Argümanlý Fonksiyonlar. printf benzeri fonksiyon yazarken kullanýlýr. Debug log sistemlerinde kullanýlýr
+void Log(const char *fmt, ...)
 {
-    uint16_t adcResult = 0;      // ADC sonucu tutulacak deðiþken
-    ReadADC(&adcResult);         // Deðiþkenin adresi fonksiyona gönderilir
+    /* deðiþken argüman iþleme */
 }
 
-// Pointer ile Donaným Register Eriþimi (Temel Mantýk). STM32 register’larý belirli bellek adreslerindedir. Bu yapý: CMSIS HAL Bare-metal STM32 kodlarýnýn temelidir
-#define GPIOA_ODR   ((uint32_t*)0x48000014)   // GPIOA Output Data Register adresi
-*GPIOA_ODR = 0x00000001;       // PA0 pinini 1 yapar (LED yakma örneði)
 
-// volatile ve Pointer Birlikteliði. Donaným register’larý volatile olmak zorundadýr.
-#define GPIOA_IDR   ((volatile uint32_t*)0x48000010)   // GPIOA Input Data Register
-uint32_t buttonState;
-buttonState = *GPIOA_IDR;      // Buton durumu okunur
+#include <signal.h>          // Sinyal tanýmlarý. Sinyaller (Nadiren). Bare-metal STM32’de neredeyse hiç kullanýlmaz.
 
-// Pointer ile Dizi Ýliþkisi (STM32 Buffer Kullanýmý). UART, SPI, I2C buffer mantýðý bu yapý üzerine kuruludur.
-uint8_t rxBuffer[10];          // UART RX buffer
-uint8_t *pRxBuffer;            // Buffer baþlangýcýný gösteren pointer
-pRxBuffer = rxBuffer;          // Dizinin ilk eleman adresi
 
-//-----------------------------------------------------------------------------------------------------------------------------
-// Struct
-
-// struct, farklý tipteki verileri tek bir mantýksal yapý altýnda toplamak için kullanýlýr. Gömülü sistemlerde bu genellikle peripheral, sensör veya konfigürasyon modeli anlamýna gelir.
-struct SensorData
+#include <float.h>           // Float sýnýrlarý. Sayýsal sýnýr kontrolü gereken durumlarda.
+float v;
+if (v > FLT_MAX)             // Float taþma kontrolü
 {
-    uint16_t raw;             // ADC’den okunan ham deðer
-    float voltage;            // Hesaplanan voltaj
-    uint8_t status;           // Sensör durumu
-};
-
-// struct Deðiþkeni Tanýmlama ve Kullanma
-struct SensorData sensor1;    // SensorData tipinde deðiþken
-
-sensor1.raw = 2000;           // Struct üyesine eriþim
-sensor1.voltage = 1.65f;      // Nokta (.) operatörü kullanýlýr
-sensor1.status = 1;           // Sensör aktif
-
-// typedef ile Daha Okunabilir Struct Tanýmý. STM32 projelerinde standart kullaným þeklidir.
-typedef struct
-{
-    uint16_t raw;             // ADC ham veri
-    float voltage;            // Voltaj deðeri
-    uint8_t status;           // Sensör durumu
-} Sensor_t;
-
-Sensor_t sensor1;             // Artýk struct keyword gerekmez
-sensor1.raw = 3000;           // Üye eriþimi
-sensor1.voltage = 2.4f;       // Hesaplanan deðer
-sensor1.status = 0;           // Sensör pasif
-
-// Struct Pointer Kullanýmý (-> Operatörü). Driver ve HAL fonksiyonlarýnda en sýk kullanýlan yapý.
-Sensor_t sensor1;             // Sensor yapýsý
-Sensor_t *pSensor;            // Sensor yapýsýný gösteren pointer
-
-pSensor = &sensor1;            // Struct adresi pointer’a atanýr
-
-pSensor->raw = 1500;           // Pointer ile struct üyesine eriþim
-pSensor->voltage = 1.2f;       // -> operatörü kullanýlýr
-pSensor->status = 1;           // Sensör aktif
-
-// Fonksiyonlara Struct Pointer Gönderme. STM32 driver mimarisinin temelidir.
-void Sensor_Update(Sensor_t *sensor)   // Struct pointer parametre olarak alýnýr
-{
-    sensor->raw = 2048;                // ADC okuma simülasyonu
-    sensor->voltage = 1.65f;           // Voltaj hesaplanýr
-    sensor->status = 1;                // Sensör geçerli
+    v = 0.0f;
 }
 
-int main(void)
-{
-    Sensor_t mySensor;                 // Sensor instance
-    Sensor_Update(&mySensor);           // Adres fonksiyona gönderilir
-}
 
-// Struct ile Peripheral Konfigürasyonu (STM32 Tarzý). HAL yapýlarýna birebir benzer örnek.
-typedef struct
-{
-    uint32_t baudRate;         // UART baud rate
-    uint8_t dataBits;          // Veri bit sayýsý
-    uint8_t stopBits;          // Stop bit sayýsý
-} UART_Config_t;
+#include <setjmp.h>          // setjmp / longjmp. Stack Atlama (Genelde Kaçýnýlýr). Gömülü sistemlerde önerilmez.
 
-UART_Config_t uart1Config;     // UART konfigürasyon yapýsý
 
-uart1Config.baudRate = 115200; // UART hýzý
-uart1Config.dataBits = 8;      // 8-bit veri
-uart1Config.stopBits = 1;      // 1 stop bit
-
-// Struct Dizisi (Birden Fazla Sensör / Peripheral)
-Sensor_t sensors[3];           // 3 adet sensör yapýsý
-
-sensors[0].raw = 1000;         // Ýlk sensör
-sensors[1].raw = 2000;         // Ýkinci sensör
-sensors[2].raw = 3000;         // Üçüncü sensör
-
-// Embedded Perspektifinden Neden Struct?
-//STM32 tarafýnda struct kullanýmý: Peripheral konfigürasyonlarý, Driver state yönetimi, Sensör soyutlama, Kod okunabilirliði, Bakým ve geniþletilebilirlik için kritik önemdedir.
-
-// Pointer + Struct = STM32 HAL Mantýðý (Kavramsal). Bu yapý, STM32’nin CMSIS register haritalamasýnýn temel fikridir.
-typedef struct
-{
-    volatile uint32_t *ODR;    // GPIO Output Data Register adresi
-    volatile uint32_t *IDR;    // GPIO Input Data Register adresi
-} GPIO_Port_t;
-
+#include <stdatomic.h>       // Atomik tipler. Atomik Ýþlemler (Modern C). RTOS veya çok çekirdekli sistemlerde anlamlýdýr.
+atomic_uint flag;            // Interrupt-safe bayrak
 
 
 int main(int argc, char *argv[]) {
