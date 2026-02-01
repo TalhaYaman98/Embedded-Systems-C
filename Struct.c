@@ -1,4 +1,4 @@
-/* ---------- Struct---------- */ 
+/* ---------- Struct ---------- */ 
 
 // struct, farklý tipteki verileri tek bir mantýksal yapý altýnda toplamak için kullanýlýr. Gömülü sistemlerde bu genellikle peripheral, sensör veya konfigürasyon modeli anlamýna gelir.
 struct SensorData

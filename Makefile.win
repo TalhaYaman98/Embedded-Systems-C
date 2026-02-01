@@ -4,8 +4,8 @@
 CPP      = g++.exe
 CC       = gcc.exe
 WINDRES  = windres.exe
-OBJ      = main.o
-LINKOBJ  = main.o
+OBJ      = main.o Struct.o Pointer.o Variables.o Bitwise.o
+LINKOBJ  = main.o Struct.o Pointer.o Variables.o Bitwise.o
 LIBS     = -L"D:/DevCpp/Dev-Cpp/MinGW64/lib" -L"D:/DevCpp/Dev-Cpp/MinGW64/x86_64-w64-mingw32/lib" -static-libgcc
 INCS     = -I"D:/DevCpp/Dev-Cpp/MinGW64/include" -I"D:/DevCpp/Dev-Cpp/MinGW64/x86_64-w64-mingw32/include" -I"D:/DevCpp/Dev-Cpp/MinGW64/lib/gcc/x86_64-w64-mingw32/4.9.2/include"
 CXXINCS  = -I"D:/DevCpp/Dev-Cpp/MinGW64/include" -I"D:/DevCpp/Dev-Cpp/MinGW64/x86_64-w64-mingw32/include" -I"D:/DevCpp/Dev-Cpp/MinGW64/lib/gcc/x86_64-w64-mingw32/4.9.2/include" -I"D:/DevCpp/Dev-Cpp/MinGW64/lib/gcc/x86_64-w64-mingw32/4.9.2/include/c++"
@@ -26,3 +26,15 @@ $(BIN): $(OBJ)
 
 main.o: main.c
 	$(CC) -c main.c -o main.o $(CFLAGS)
+
+Struct.o: Struct.c
+	$(CC) -c Struct.c -o Struct.o $(CFLAGS)
+
+Pointer.o: Pointer.c
+	$(CC) -c Pointer.c -o Pointer.o $(CFLAGS)
+
+Variables.o: Variables.c
+	$(CC) -c Variables.c -o Variables.o $(CFLAGS)
+
+Bitwise.o: Bitwise.c
+	$(CC) -c Bitwise.c -o Bitwise.o $(CFLAGS)
