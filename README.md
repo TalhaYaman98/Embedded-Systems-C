@@ -1,2 +1,2 @@
-# Embedded Systems C
-C language embedded systems practices (stm32)
+# C-Practices
+C language practices for embedded systems (stm32)
