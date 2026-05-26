@@ -1,163 +1,291 @@
-/* ---------- Pointer ---------- */
+#include <stdint.h>
+#include <stdio.h>
 
-// Pointer, bir deðiþkenin RAM’deki adresini tutan deðiþkendir.
-int value = 10;              
-int *pValue;                 
-pValue = &value;             
+/*
+ * Onislemci
+ * MISRA-C:2012 Uygulamalari
+ *
+ * Kullanilan kurallar:
+ *   Rule  7.2  â€” unsigned sabit literaller U suffix tasimali
+ *   Rule  8.1  â€” tipler acikca belirtilmeli
+ *   Rule 20.1  â€” #include oncesinde sadece #ifndef olmali
+ *   Rule 20.2  â€” standart baslik dosyasi isimleri kullanilmamali
+ *   Rule 20.3  â€” #include dosya adi gecerli olmali
+ *   Rule 20.4  â€” macro ile anahtar kelime tanimi yapilmamali
+ *   Rule 20.5  â€” #undef kullanimi yasak
+ *   Rule 20.7  â€” macro parametresi parantez icinde olmali
+ *   Rule 20.10 â€” # ve ## operatoru kullanimi kisitli
+ *   Rule 20.11 â€” macro parametresi # veya ## ile kullanilmamali
+ *   Rule 20.13 â€” #else #elif #endif kendi satirinda olmali
+ *   Rule 20.14 â€” #if #ifdef #ifndef eslesmeli olmali
+ */
 
+/* PROTOTIP BILDIRIMLERI */
 
-/* --- Pointer ile Deðere Eriþim (Dereference) --- */
+static void makro_tanimlama(void);
+static void kosullu_derleme(void);
+static void header_guard(void);
+static void platform_soyutlama(void);
+static void yaygin_hatalar(void);
 
-// * operatörü ile pointer’ýn gösterdiði adresteki deðere ulaþýlýr.
-int value2 = 10;             
-int *pValue2 = &value2;      
+/* BASIT SABIT MAKROLAR */
 
-value2 = 20;                 
-*pValue2 = 30;                // Ayný deðiþken pointer üzerinden deðiþtirilir
+/* Versiyon numaralari â€” Major.Minor.Patch formatinda */
+#define VERSIYON_MAJOR    (1U)  /* buyuk surum â€” API degisiklikleri        */
+#define VERSIYON_MINOR    (0U)  /* kucuk surum â€” yeni ozellik eklendi      */
+#define VERSIYON_PATCH    (2U)  /* yama â€” hata duzeltmesi                  */
 
+/* Bit islem makrolari â€” n parametresi shift miktarini belirler */
+#define BIT(n)            (1U << (n))       /* n. biti 1 yapar: BIT(3) = 0x08  */
+#define BIT_MASK(n)       (BIT(n) - 1U)     /* n bitlik maske: BIT_MASK(4)=0x0F */
 
-/* --- Pointer ve Sabit Geniþlikli Tipler --- */
+/* ADC sinir degerleri â€” 12-bit cozunurluk icin */
+#define ADC_MAX           (4095U)  /* 2^12 - 1 â€” maksimum ADC cikisi       */
+#define ADC_MIN           (0U)     /* minimum ADC cikisi                    */
 
-// Gömülü sistemlerde pointer tipi veri geniþliði ile uyumlu olmalýdýr
-uint16_t adcValue = 0;       
-uint16_t *pAdcValue;         
-pAdcValue = &adcValue;       
+/* Sicaklik sinir degerleri â€” isaretli tip, U suffix yok */
+#define SICAKLIK_MAX      (125)    /* maksimum olcum araligi (C)            */
+#define SICAKLIK_MIN      (-40)    /* minimum olcum araligi (C)             */
 
+/* Bellek boyutu hesaplamalari â€” okunabilirlik icin KB makrosu kullanildi */
+#define KB                (1024U)        /* 1 kilobyte = 1024 byte          */
+#define FLASH_BOY         (64U * KB)     /* STM32F103C8 flash boyutu        */
+#define RAM_BOY           (20U * KB)     /* STM32F103C8 SRAM boyutu         */
 
-/* --- Fonksiyonlara Pointer ile Parametre Gönderme --- */
+/* FONKSIYON BENZERI MAKROLAR */
 
-// HAL ve driver yapýlarýnda temel kullaným
-void ReadADC(uint16_t *value)    
+/* Her parametre ayri parantez icinde â€” operator onceligi hatasinÄ± onler */
+/* Rule 20.7: (a) ve (b) parantezi zorunlu â€” MAX(x+1, y) gibi kullanim guvenli */
+#define MAX(a, b)            (((a) > (b)) ? (a) : (b))   /* buyugu dondur  */
+#define MIN(a, b)            (((a) < (b)) ? (a) : (b))   /* kucugu dondur  */
+#define SINIRLA(x, lo, hi)   (MAX((lo), MIN((x), (hi)))) /* araliga kisitla */
+
+/* Register bit islem makrolari â€” donanim suruculerinde yaygin kullanim */
+#define BIT_SET(reg, bit)    ((reg) |=  (bit))   /* biti 1 yap              */
+#define BIT_CLR(reg, bit)    ((reg) &= ~(bit))   /* biti 0 yap              */
+#define BIT_TGL(reg, bit)    ((reg) ^=  (bit))   /* bit degerini tersle     */
+#define BIT_RD(reg,  bit)    (((reg) & (bit)) != 0U) /* bit okunur, boolean */
+
+/* Zaman birimi donusumleri â€” HAL_GetTick() 1ms cozunurluk saglar */
+#define MS_TO_TICK(ms)    ((ms) * 1U)        /* milisaniye â†’ tick           */
+#define TICK_TO_MS(tick)  ((tick) / 1U)      /* tick â†’ milisaniye           */
+
+/* Aci donusumu â€” float hesaplama, sadece gerektiginde kullan */
+#define DEG_TO_RAD(deg)   ((deg) * 3.14159f / 180.0f)
+
+/* Dizi boyutu hesaplama â€” sabit kodlama yerine bu makro kullan            */
+/* sizeof(arr)/sizeof(arr[0]) â€” tip degisirse otomatik guncellenir         */
+#define ARRAY_SIZE(arr)   ((uint8_t)(sizeof(arr) / sizeof((arr)[0U])))
+
+/* KOSULLU DERLEME */
+
+/* Platform ve build tanimlari â€” normalde Makefile veya IDE'den gelir      */
+/* -DSTM32F4XX ve -DDEBUG_AKTIF seklinde derleyiciye gecilir               */
+#define STM32F4XX   /* hedef mikrodenetleyici ailesi                        */
+#define DEBUG_AKTIF /* debug build â€” release icin bu satiri kaldir          */
+
+/* DBG_PRINT â€” debug buildde printf, release buildde bos kalir             */
+/* release buildde derleyici bu satirlari tamamen kaldirir, sifir maliyet  */
+#ifdef DEBUG_AKTIF
+    #define DBG_PRINT(fmt, ...)  printf(fmt, ##__VA_ARGS__) /* debug aktif  */
+#else
+    #define DBG_PRINT(fmt, ...)  /* bos â€” release buildde kod uretilmez     */
+#endif
+
+/* Optimizasyon seviyesi â€” debug ve release icin farkli deger */
+#ifdef DEBUG_AKTIF
+    #define OPTIMIZE_LEVEL  (0U)  /* -O0: optimizasyon yok, debug kolayligi */
+#else
+    #define OPTIMIZE_LEVEL  (2U)  /* -O2: release icin hiz optimizasyonu    */
+#endif
+
+/* PLATFORM SOYUTLAMA */
+
+/* Farkli STM32 serilerinde pin ve frekans tanimlarini soyutla             */
+/* Tek bir kaynak dosya birden fazla platformu destekleyebilir             */
+#ifdef STM32F4XX
+    #define LED_PORT      "GPIOD"   /* STM32F4 Discovery board LED portu   */
+    #define LED_PIN       (12U)     /* PD12 â€” yesil LED                    */
+    #define CPU_FREQ_MHZ  (168U)    /* maksimum sistem saati frekans       */
+#elif defined(STM32F1XX)
+    #define LED_PORT      "GPIOC"   /* STM32F103 Blue Pill LED portu       */
+    #define LED_PIN       (13U)     /* PC13 â€” dahili LED                   */
+    #define CPU_FREQ_MHZ  (72U)     /* maksimum sistem saati frekans       */
+#else
+    #error "Desteklenmeyen platform â€” STM32F4XX veya STM32F1XX tanimlanmali"
+#endif
+
+/* Derleyici spesifik attribute soyutlamasi                                */
+/* GCC, IAR, Keil farkli syntax kullanir â€” tek noktadan yonetim saglar    */
+#ifdef __GNUC__
+    #define PACKED        __attribute__((packed))     /* struct padding kaldir */
+    #define ALIGNED(n)    __attribute__((aligned(n))) /* n-byte hizalama       */
+    #define WEAK          __attribute__((weak))       /* override edilebilir   */
+    #define NO_RETURN     __attribute__((noreturn))   /* donmeyen fonksiyon    */
+#else
+    #define PACKED        /* diger derleyiciler icin bos birak */
+    #define ALIGNED(n)
+    #define WEAK
+    #define NO_RETURN
+#endif
+
+/* HEADER GUARD YAPISI */
+
+/* Her .h dosyasinin basinda olmali â€” ayni baslik iki kez include edilirse */
+/* ikinci include atlanir, coklu tanim hatalari onlenir                    */
+
+/* #ifndef SENSOR_H        â€” tanimli degil mi?                             */
+/* #define SENSOR_H        â€” tanimla, bir dahaki include atlanir           */
+/*                                                                         */
+/*   #include <stdint.h>                                                   */
+/*                                                                         */
+/*   typedef struct { ... } Sensor_t;  â€” tip tanimlari                    */
+/*   void sensor_init(void);           â€” fonksiyon prototipleri           */
+/*                                                                         */
+/* #endif  / * SENSOR_H * /  â€” guard sonu, dosya adi ile eslestir         */
+
+/* FONKSIYON TANIMLARI */
+
+static void makro_tanimlama(void)
 {
-    if (value != 0)               // Null pointer kontrolü
+    /* Versiyon bilgisi â€” her uc alan ayri makro, bagimsiz guncellenebilir */
+    printf("Versiyon          : %u.%u.%u\n",
+           (uint32_t)VERSIYON_MAJOR,
+           (uint32_t)VERSIYON_MINOR,
+           (uint32_t)VERSIYON_PATCH);
+
+    /* Bellek boyutu â€” KB makrosu ile okunabilir tanim */
+    printf("Flash boyutu      : %u byte\n", (uint32_t)FLASH_BOY); /* 65536 */
+    printf("RAM boyutu        : %u byte\n", (uint32_t)RAM_BOY);   /* 20480 */
+
+    /* Bit islem makrolarinin kullanimi â€” donanim register ornegi */
+    uint8_t reg = 0x00U; /* baslangic â€” tum bitler sifir */
+
+    BIT_SET(reg, BIT(3U)); /* bit 3'u set et â€” 0x00 â†’ 0x08 */
+    printf("BIT_SET(3)        : 0x%02X\n", (uint32_t)reg);
+
+    BIT_CLR(reg, BIT(3U)); /* bit 3'u temizle â€” 0x08 â†’ 0x00 */
+    printf("BIT_CLR(3)        : 0x%02X\n", (uint32_t)reg);
+
+    BIT_TGL(reg, BIT(5U)); /* bit 5'i tersle â€” 0x00 â†’ 0x20 */
+    printf("BIT_TGL(5)        : 0x%02X\n", (uint32_t)reg);
+
+    /* MAX/MIN/SINIRLA â€” kopyala-yapistir yerine makro ile kod tekrari onlenir */
+    uint8_t a = 45U;
+    uint8_t b = 78U;
+    printf("MAX(45,78)        : %u\n", (uint32_t)MAX(a, b));           /* 78  */
+    printf("MIN(45,78)        : %u\n", (uint32_t)MIN(a, b));           /* 45  */
+    printf("SINIRLA(200,0,100): %u\n", (uint32_t)SINIRLA(200U, 0U, 100U)); /* 100 */
+
+    /* ARRAY_SIZE â€” dizi boyutu degisirse makro otomatik guncellenir */
+    uint8_t dizi[8U] = {0U};
+    printf("ARRAY_SIZE        : %u\n", (uint32_t)ARRAY_SIZE(dizi)); /* 8 */
+
+    /* Zaman donusumu â€” HAL tabanli gecikme hesaplamalarinda kullanilir */
+    printf("500ms tick        : %u\n", (uint32_t)MS_TO_TICK(500U)); /* 500 */
+}
+
+static void kosullu_derleme(void)
+{
+    /* Optimizasyon seviyesi â€” debug/release build farki gorulur */
+    printf("Optimize seviyesi : %u\n", (uint32_t)OPTIMIZE_LEVEL); /* 0 */
+
+    /* DBG_PRINT â€” DEBUG_AKTIF tanimli oldugu icin yazdirilir              */
+    /* release buildde bu satir derlenmez, kod boyutu artmaz               */
+    DBG_PRINT("Debug mesaji      : DEBUG_AKTIF tanimli ise gorulur\n");
+
+    /* #if ile derleme zamani sayisal karsilastirma â€” runtime degil        */
+    /* kosul saglanmazsa blok derlenmez, sifir maliyet                     */
+    #if (VERSIYON_MAJOR >= 1U)
+        printf("Versiyon          : 1.0 veya uzeri\n");
+    #else
+        printf("Versiyon          : 1.0 altÄ±\n");
+    #endif
+}
+
+static void header_guard(void)
+{
+    /* #pragma once MISRA uyumlu degil â€” #ifndef/#define/#endif kullan     */
+    /* Bazi derleyiciler pragma once desteklemez, tasÄ±nabilirlik azalir    */
+    printf("Header guard      : ifndef/define/endif yapisi kullan\n");
+    printf("Pragma once       : MISRA uyumlu degil â€” ifndef tercih et\n");
+}
+
+static void platform_soyutlama(void)
+{
+    /* Hedef platforma gore derlenen degerler yazdirilir                   */
+    /* STM32F4XX tanimli oldugu icin GPIOD ve 168MHz gorulur               */
+    printf("LED port          : %s\n",     LED_PORT);
+    printf("LED pin           : %u\n",     (uint32_t)LED_PIN);
+    printf("CPU frekans       : %u MHz\n", (uint32_t)CPU_FREQ_MHZ);
+
+    /* Derleyici tespiti â€” GCC'de __GNUC__ otomatik tanimlanir */
+    #ifdef __GNUC__
+        printf("Derleyici         : GCC\n");
+    #else
+        printf("Derleyici         : diger\n");
+    #endif
+}
+
+static void yaygin_hatalar(void)
+{
+    /* 1) Parametresiz makro â€” operator onceligi hatasi                    */
     {
-        *value = 2048;           
+        /* #define KARE(x)  x*x   â€” YANLIS                                 */
+        /* KARE(2+3) â†’ 2+3*2+3 = 11, beklenen 25                          */
+        /* #define KARE(x)  ((x)*(x)) â€” DOGRU, her parametre parantezli   */
+        uint8_t a     = 3U;
+        uint8_t b     = 4U;
+        uint8_t dogru = ((a + b) * (a + b)); /* parantez ile dogru oncelik */
+        printf("Makro parantez    : %u\n", (uint32_t)dogru); /* 49 */
+    }
+
+    /* 2) Coklu degerlendirme â€” makro parametresi iki kez calisabilir     */
+    {
+        /* MAX(i++, j++) â€” i veya j iki kez artirilir, yan etki olusur    */
+        /* cozum: once gecici degiskene ata, sonra makroya gec            */
+        uint8_t x     = 5U;
+        uint8_t y     = 3U;
+        uint8_t tmp_x = x; /* once gecici degiskene al â€” yan etki onlendi */
+        uint8_t tmp_y = y;
+        uint8_t maks  = MAX(tmp_x, tmp_y); /* guvenli kullanim             */
+        printf("MAX(5,3)          : %u\n", (uint32_t)maks); /* 5 */
+    }
+
+    /* 3) #undef kullanimi â€” Rule 20.5 ihlali                             */
+    {
+        /* #define GECICI 10U                                              */
+        /* #undef  GECICI â€” tanimsizlastirma MISRA'da yasak               */
+        /* cozum: farkli isim kullan veya scope ile yasam suresi kisalt   */
+        printf("undef             : Rule 20.5 ihlali â€” kullanma\n");
+    }
+
+    /* 4) Recursive makro â€” tanimsiz davranis, derleyici donguye girer    */
+    {
+        /* #define A  (A + 1U) â€” A, kendini cagirÄ±r, sonsuz genisleme     */
+        /* cozum: makro kendi ismini icermemeli                           */
+        printf("Recursive makro   : tanimsiz davranis â€” kullanma\n");
     }
 }
 
+/* MAIN */
+
 int main(void)
 {
-    uint16_t adcResult = 0;      
-    ReadADC(&adcResult);         
+    printf("/* MAKRO TANIMLAMA */\n");
+    makro_tanimlama();
+
+    printf("\n/* KOSULLU DERLEME */\n");
+    kosullu_derleme();
+
+    printf("\n/* HEADER GUARD */\n");
+    header_guard();
+
+    printf("\n/* PLATFORM SOYUTLAMA */\n");
+    platform_soyutlama();
+
+    printf("\n/* YAYGIN HATALAR */\n");
+    yaygin_hatalar();
+
+    return 0;
 }
-
-
-/* --- Pointer ile Donaným Register Eriþimi --- */
-
-// STM32 register’larý sabit adreslerdedir
-#define GPIOA_ODR   ((uint32_t*)0x48000014)   
-
-*GPIOA_ODR = 0x00000001;       // PA0 HIGH
-
-
-/* --- volatile ve Pointer Birlikteliði --- */
-
-// Donaným register’larý volatile olmalýdýr
-#define GPIOA_IDR   ((volatile uint32_t*)0x48000010)   
-
-uint32_t buttonState;
-buttonState = *GPIOA_IDR;      // Donanýmdan anlýk veri okunur
-
-
-/* --- Pointer ile Dizi Ýliþkisi --- */
-
-// Dizinin adý zaten pointer’dýr (ilk elemanýn adresi)
-uint8_t rxBuffer[10];          
-uint8_t *pRxBuffer;            
-
-pRxBuffer = rxBuffer;          
-
-pRxBuffer[0] = 0x55;           // Index ile eriþim
-*(pRxBuffer + 1) = 0xAA;       // Pointer aritmetiði ile eriþim
-
-
-/* --- Pointer Aritmetiði --- */
-
-// Pointer veri tipine göre artar
-uint16_t arr[3] = {10, 20, 30};
-uint16_t *pArr = arr;
-
-pArr++;                        // 2 byte ileri gider (uint16_t)
-uint16_t val = *pArr;          // 20
-
-
-/* --- Pointer to Pointer (Çift Pointer) --- */
-
-// Özellikle buffer yönetimi ve dinamik yapýlarýn temelidir
-uint8_t data = 5;
-uint8_t *pData = &data;
-uint8_t **ppData = &pData;
-
-**ppData = 10;                 // data = 10 olur
-
-
-/* --- Const Pointer Kullanýmý --- */
-
-// Veri sabit, pointer deðiþebilir
-const uint8_t val1 = 10;
-const uint8_t *p1 = &val1;     // Veri deðiþtirilemez
-
-// Pointer sabit, veri deðiþebilir
-uint8_t val2 = 20;
-uint8_t *const p2 = &val2;     // Pointer adresi deðiþtirilemez
-
-// Ýkisi de sabit
-const uint8_t *const p3 = &val1;
-
-
-/* --- Struct Pointer (HAL Mantýðý) --- */
-
-typedef struct
-{
-    uint32_t ODR;
-    uint32_t IDR;
-} GPIO_t;
-
-GPIO_t gpio;
-GPIO_t *pGpio = &gpio;
-
-pGpio->ODR = 1;                // HAL tarzý eriþim
-
-
-/* --- Function Pointer (Callback Mekanizmasý) --- */
-
-// Interrupt ve event tabanlý sistemlerin temelidir
-void Led_On(void)
-{
-    /* LED yak */
-}
-
-void (*funcPtr)(void);         // Fonksiyon pointer
-
-funcPtr = Led_On;              
-funcPtr();                     // Fonksiyon çaðrýlýr
-
-
-/* --- Void Pointer (Generic Kullaným) --- */
-
-// Tip baðýmsýz pointer (generic API'lerde kullanýlýr)
-void WriteData(void *data)
-{
-    uint8_t *p = (uint8_t*)data;   // Cast zorunlu
-    *p = 0xFF;
-}
-
-
-/* --- Null Pointer Güvenliði --- */
-
-uint8_t *pNull = 0;
-
-if (pNull != 0)               // NULL kontrolü zorunlu
-{
-    *pNull = 1;
-}
-
-
-/* --- Embedded Perspektif --- */
-
-// Pointer neden kritik?
-// - Register eriþimi (memory mapped IO)
-// - DMA buffer yönetimi
-// - ISR veri paylaþýmý
-// - HAL driver yapýlarý
-// - Performans (kopya yerine adres ile çalýþma)
