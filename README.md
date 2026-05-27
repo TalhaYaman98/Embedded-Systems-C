@@ -81,8 +81,6 @@ Gerçek STM32 projesine taşırken:
 ## Klasör Yapısı
 
 ```
-CCppCalismalar/
-└── Cpratikleri/
     ├── Veriables.c
     ├── Functions.c
     ├── Pointer.c
