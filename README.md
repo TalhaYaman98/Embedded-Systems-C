@@ -21,6 +21,24 @@ STM32 hedefli, MISRA-C:2012 uyumlu C dili çalışma notları.
 | `Watchdog.c` | IWDG, WWDG, görev izleme, reset nedeni tespiti |
 | `Power_Management.c` | Uyku modları, wakeup kaynakları, saat yönetimi, güç tüketim hesabı |
 | `Fault_Management.c` | Hata kodları, assert, fault handler, hata loglama |
+| `Filters_For_Measurements.c` | Moving Average, WMA, EMA, Median, IIR, FIR, Kalman, Butterworth, Alpha-Beta, Debounce |
+
+---
+
+## Filtre Seçim Rehberi
+
+| Ölçüm | Önerilen Filtre | Neden |
+|---|---|---|
+| ADC / gerilim | EMA | Basit, tek parametre, düşük bellek |
+| Sıcaklık | EMA (α=0.05..0.1) | Yavaş sistem, yumuşak yanıt yeterli |
+| Basınç | IIR / Butterworth | Frekans seçici filtreleme |
+| Anlık spike | Median | Spike'ı tamamen yok eder |
+| IMU / ivme | Kalman | Gürültü + model birlikte işlenir |
+| Enkoder hız | Alpha-Beta | Konum + hız birlikte tahmin |
+| Genel amaç | Moving Average | Anlaşılır, öngörülebilir davranış |
+| Ses / titreşim | FIR | Doğrusal faz, kararlı |
+| Buton | Debounce | Dijital titreşim temizleme |
+| Motor akım | WMA | Yeni veriye daha duyarlı |
 
 ---
 
@@ -53,7 +71,6 @@ Her dosyada uygulanan kurallar dosya başında listelenmiştir. Genel olarak uyg
 | IDE | Visual Studio Code |
 | Hedef platform | STM32 (Cortex-M) |
 | C standardı | C99 |
-
 
 ---
 
@@ -94,6 +111,7 @@ Gerçek STM32 projesine taşırken:
     ├── Watchdog.c
     ├── Power_Management.c
     ├── Fault_Management.c
+    ├── Filters_For_Measurements.c
     └── README.md
 ```
 
